@@ -23,7 +23,7 @@ def main():
     files = {name: ROOT / "extension" / name for name in ASSETS}
     files["README.md"] = ROOT / "README.md"
     contents = {name: path.read_bytes() for name, path in files.items()}
-    output = ROOT / "dist/pokemon-center-check.zip"
+    output = ROOT / "dist/ichwillnixverpassen.zip"
     output.parent.mkdir(exist_ok=True)
     with ZipFile(output, "w", compression=ZIP_DEFLATED, compresslevel=9) as archive:
         for name, data in sorted(contents.items()):

@@ -2,15 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DEFAULT_URL } from '../extension/core.js';
 
-const NEXT = 'pokemon-next-check';
-const WATCHDOG = 'pokemon-check-watchdog';
+const NEXT = 'ichwillnixverpassen-next-check';
+const WATCHDOG = 'ichwillnixverpassen-check-watchdog';
+const primaryShopOrigins = ['https://shop.example/*'];
 const credentials = {
   productUrl: DEFAULT_URL,
-  productTitle: 'Delta-Herrschaft',
+  productTitle: 'Kabellose Kopfhörer',
   botToken: '123456:private-test-token',
   chatId: '123456',
 };
-const productA = { productUrl: DEFAULT_URL, productTitle: 'Delta-Herrschaft' };
+const productA = { productUrl: DEFAULT_URL, productTitle: 'Kabellose Kopfhörer' };
 const productB = { productUrl: `${DEFAULT_URL}-produkt-b`, productTitle: 'Produkt Beta' };
 const productC = { productUrl: `${DEFAULT_URL}-produkt-c`, productTitle: 'Produkt Gamma' };
 let fixtureId = 0;
@@ -44,7 +45,7 @@ async function withWorker(initial, run) {
   const previousChrome = globalThis.chrome;
   const previousFetch = globalThis.fetch;
   const previousSetTimeout = globalThis.setTimeout;
-  const alarmState = new Map();
+  const alarmState = new Map((initial.alarms || []).map(alarm => [alarm.name, { ...alarm }]));
   const alarmCalls = [];
   const local = storageArea(initial.local);
   const session = storageArea(initial.session);
@@ -54,16 +55,23 @@ async function withWorker(initial, run) {
   let inspectionStatus = 'unavailable';
   let inspectionCount = 0;
   const inspectionHistory = [];
+  const inspectionArguments = [];
   const navigationHistory = [];
+  const tabQueries = [];
+  const grantedOrigins = new Set(['https://api.telegram.org/*', ...(initial.origins || [])]);
   const statusesByUrl = new Map();
   const failedNavigations = new Set();
   const configured = initial.local?.settings?.products || [productA];
-  const tabs = new Map(configured.map((product, index) => [index + 1, { id: index + 1, url: product.productUrl, status: 'complete' }]));
+  const initialTabs = initial.tabs || configured.map((product, index) => ({ id: index + 1, url: product.productUrl, status: 'complete' }));
+  const tabs = new Map(initialTabs.map(tab => [tab.id, tab]));
   const chrome = {
     storage: { local, session },
+    permissions: {
+      async contains({ origins }) { return origins.every(origin => grantedOrigins.has(origin)); },
+    },
     runtime: {
-      id: 'local-pokemon-test',
-      getURL: path => `chrome-extension://local-pokemon-test/${path}`,
+      id: 'local-shop-test',
+      getURL: path => `chrome-extension://local-shop-test/${path}`,
       onMessage: event(), onInstalled: event(), onStartup: event(),
       async openOptionsPage() {},
     },
@@ -74,6 +82,7 @@ async function withWorker(initial, run) {
     alarms: {
       onAlarm: event(),
       async get(name) { return alarmState.get(name); },
+      async getAll() { return [...alarmState.values()].map(alarm => ({ ...alarm })); },
       async create(name, options) {
         alarmCalls.push({ name, ...options });
         alarmState.set(name, { name, scheduledTime: options.when });
@@ -81,7 +90,13 @@ async function withWorker(initial, run) {
       async clear(name) { return alarmState.delete(name); },
     },
     tabs: {
-      async query() { return [...tabs.values()].map(tab => ({ ...tab })); },
+      async query({ url }) {
+        tabQueries.push(url);
+        return [...tabs.values()].filter(tab => {
+          const parsed = new URL(tab.url);
+          return `${parsed.protocol}//${parsed.hostname}/*` === url;
+        }).map(tab => ({ ...tab }));
+      },
       async get(id) {
         if (!tabs.has(id)) throw new Error('Tab wurde geschlossen.');
         return { ...tabs.get(id) };
@@ -109,6 +124,7 @@ async function withWorker(initial, run) {
           inspectionCount++;
           const url = args[0].productUrl;
           inspectionHistory.push(url);
+          inspectionArguments.push(structuredClone(args[0]));
           const status = statusesByUrl.get(url) || inspectionStatus;
           return [{ result: { status, reason: status === 'available' ? 'Warenkorb bedienbar' : 'Nicht verfügbar' } }];
         }
@@ -135,6 +151,9 @@ async function withWorker(initial, run) {
       failNextNavigation: url => failedNavigations.add(url),
       navigationHistory,
       inspectionHistory,
+      inspectionArguments,
+      tabQueries,
+      grantedOrigins,
       restartWorker: async () => {
         const restarted = await import(`../extension/background.js?fixture=${++fixtureId}`);
         await restarted.handleMessage({ type: 'GET_STATUS' });
@@ -158,7 +177,7 @@ async function spinUntil(predicate) {
 }
 
 test('Extension worker: Start ohne Telegram-Daten wird abgelehnt', async () => {
-  await withWorker({}, async ({ worker, local, alarmState, reloadCount }) => {
+  await withWorker({ origins: primaryShopOrigins }, async ({ worker, local, alarmState, reloadCount }) => {
     await assert.rejects(worker.handleMessage({ type: 'START' }), /Bot-Token|Chat-ID/);
     assert.notEqual(local.monitor?.enabled, true);
     assert.equal(alarmState.has(NEXT), false);
@@ -166,8 +185,18 @@ test('Extension worker: Start ohne Telegram-Daten wird abgelehnt', async () => {
   });
 });
 
+test('Extension worker: Telegram-Freigabe allein erlaubt keinen Zugriff auf einen konfigurierten Shop', async () => {
+  await withWorker({ origins: [], local: { settings: credentials } }, async ({ worker, local, grantedOrigins, alarmState, navigationHistory }) => {
+    assert.deepEqual([...grantedOrigins], ['https://api.telegram.org/*']);
+    await assert.rejects(worker.handleMessage({ type: 'START' }), /Zugriff.*shop\.example/);
+    assert.notEqual(local.monitor?.enabled, true);
+    assert.equal(alarmState.has(NEXT), false);
+    assert.deepEqual(navigationHistory, []);
+  });
+});
+
 test('Extension worker: Status enthält keinen Token; Speichern mit leerem Feld erhält ihn', async () => {
-  await withWorker({ local: { settings: credentials } }, async ({ worker, local }) => {
+  await withWorker({ origins: primaryShopOrigins, local: { settings: credentials } }, async ({ worker, local }) => {
     const status = await worker.getStatus();
     assert.equal(status.settings.tokenConfigured, true);
     assert.deepEqual(status.settings.products, [productA]);
@@ -184,7 +213,7 @@ test('Extension worker: Status enthält keinen Token; Speichern mit leerem Feld 
 
 test('Extension worker: Neustart stellt fehlenden Termin mit zufälligem Abstand wieder her', async () => {
   const before = Date.now();
-  await withWorker({ local: { settings: credentials, monitor: { enabled: true } } }, async ({ worker, alarmState }) => {
+  await withWorker({ origins: primaryShopOrigins, local: { settings: credentials, monitor: { enabled: true } } }, async ({ worker, alarmState }) => {
     const status = await worker.getStatus();
     const next = alarmState.get(NEXT);
     assert.ok(next.scheduledTime >= before + 900000);
@@ -194,8 +223,40 @@ test('Extension worker: Neustart stellt fehlenden Termin mit zufälligem Abstand
   });
 });
 
+test('Extension worker: Upgrade entfernt unbekannte Alarme und erhält den gespeicherten nächsten Termin', async () => {
+  const nextCheckAt = Date.now() + 20 * 60000;
+  const oldAlarmNames = ['legacy-shop-check', 'legacy-shop-watchdog', 'obsolete-periodic-task'];
+  await withWorker({
+    origins: primaryShopOrigins,
+    alarms: oldAlarmNames.map((name, index) => ({ name, scheduledTime: nextCheckAt - index * 1000 })),
+    local: { settings: credentials, monitor: { enabled: true, nextCheckAt } },
+  }, async ({ worker, chrome, alarmState, navigationHistory, restartWorker }) => {
+    for (const name of oldAlarmNames) assert.equal(alarmState.has(name), false, `Alter Alarm ${name} muss entfernt sein`);
+    assert.deepEqual([...alarmState.keys()], [NEXT]);
+    assert.equal(alarmState.get(NEXT).scheduledTime, nextCheckAt, 'Ein noch zukünftiger Termin muss beim Upgrade exakt erhalten bleiben');
+    assert.equal((await worker.getStatus()).monitor.nextCheckAt, nextCheckAt);
+    assert.deepEqual(navigationHistory, [], 'Das Upgrade allein darf keine Produktseite laden');
+    const restarted = await restartWorker();
+    assert.equal((await restarted.getStatus()).monitor.nextCheckAt, nextCheckAt);
+    assert.deepEqual((await chrome.alarms.getAll()).map(alarm => alarm.name), [NEXT]);
+  });
+});
+
+test('Extension worker: Upgrade eines gestoppten Monitors entfernt alte Alarme ohne neuen Prüftermin', async () => {
+  await withWorker({
+    origins: primaryShopOrigins,
+    alarms: [{ name: 'legacy-shop-check', scheduledTime: Date.now() + 60000 }],
+    local: { settings: credentials, monitor: { enabled: false, nextCheckAt: null } },
+  }, async ({ worker, alarmState, alarmCalls, navigationHistory }) => {
+    assert.equal(alarmState.size, 0);
+    assert.equal(alarmCalls.length, 0);
+    assert.equal((await worker.getStatus()).monitor.enabled, false);
+    assert.deepEqual(navigationHistory, []);
+  });
+});
+
 test('Extension worker: Stop leert den Termin, auch wenn eine Prüfung noch läuft', async () => {
-  await withWorker({ local: { settings: credentials, monitor: { enabled: true } } }, async ({ worker, alarmState, alarmCalls, reloadCount, setReloadGate }) => {
+  await withWorker({ origins: primaryShopOrigins, local: { settings: credentials, monitor: { enabled: true } } }, async ({ worker, alarmState, alarmCalls, reloadCount, setReloadGate }) => {
     let releaseReload;
     setReloadGate(new Promise(resolve => { releaseReload = resolve; }));
     const pendingCheck = worker.runCheck();
@@ -215,7 +276,7 @@ test('Extension worker: Stop leert den Termin, auch wenn eine Prüfung noch läu
 });
 
 test('Extension worker: Veraltete Prüfmarkierung wird beim Neustart bereinigt', async () => {
-  await withWorker({
+  await withWorker({ origins: primaryShopOrigins,
     local: { settings: credentials, monitor: { enabled: true, checking: true } },
     session: { checkLease: Date.now() - 180000 },
   }, async ({ worker, session, alarmState }) => {
@@ -228,7 +289,7 @@ test('Extension worker: Veraltete Prüfmarkierung wird beim Neustart bereinigt',
 });
 
 test('Extension worker: Watchdog plant nach verlorenem Worker erneut; deaktivierter Monitor bleibt still', async () => {
-  await withWorker({
+  await withWorker({ origins: primaryShopOrigins,
     local: { settings: credentials, monitor: { enabled: true, checking: true } },
     session: { checkLease: Date.now() },
   }, async ({ worker, chrome, local, session, alarmState, reloadCount }) => {
@@ -247,7 +308,7 @@ test('Extension worker: Watchdog plant nach verlorenem Worker erneut; deaktivier
 });
 
 test('Extension worker: Nur die eigene Einstellungsseite darf Befehle senden', async () => {
-  await withWorker({ local: { settings: credentials } }, async ({ chrome }) => {
+  await withWorker({ origins: primaryShopOrigins, local: { settings: credentials } }, async ({ chrome }) => {
     const listener = chrome.runtime.onMessage.listeners[0];
     let responded = false;
     assert.equal(listener({ type: 'GET_STATUS' }, {
@@ -266,7 +327,7 @@ test('Extension worker: Nur die eigene Einstellungsseite darf Befehle senden', a
 });
 
 test('Extension worker: Gleichzeitige Prüfaufrufe teilen bereits vor dem ersten Lease-Await dieselbe Prüfung', async () => {
-  await withWorker({ fastTimers: true, local: { settings: credentials } }, async ({ worker, chrome, reloadCount, inspectionCount }) => {
+  await withWorker({ origins: primaryShopOrigins, fastTimers: true, local: { settings: credentials } }, async ({ worker, chrome, reloadCount, inspectionCount }) => {
     const originalGet = chrome.storage.session.get;
     let releaseLeaseRead;
     const leaseGate = new Promise(resolve => { releaseLeaseRead = resolve; });
@@ -293,7 +354,7 @@ test('Extension worker: Gleichzeitige Prüfaufrufe teilen bereits vor dem ersten
 });
 
 test('Extension worker: Stop parallel zur abschließenden Monitor-Speicherung bleibt dauerhaft deaktiviert', async () => {
-  await withWorker({ fastTimers: true, local: { settings: credentials, monitor: { enabled: true } } }, async ({ worker, chrome, local, alarmState }) => {
+  await withWorker({ origins: primaryShopOrigins, fastTimers: true, local: { settings: credentials, monitor: { enabled: true } } }, async ({ worker, chrome, local, alarmState }) => {
     const originalSet = chrome.storage.local.set;
     let releaseFinalWrite;
     const finalWriteGate = new Promise(resolve => { releaseFinalWrite = resolve; });
@@ -325,7 +386,7 @@ test('Extension worker: Stop parallel zur abschließenden Monitor-Speicherung bl
 
 test('Extension worker: Telegram-Fehler wird erneut versucht; bestätigter Versand wird dedupliziert', async () => {
   const previousState = { url: DEFAULT_URL, status: 'unavailable' };
-  await withWorker({
+  await withWorker({ origins: primaryShopOrigins,
     fastTimers: true,
     local: { settings: credentials, lastProductState: previousState },
   }, async ({ worker, local, setInspectionStatus, setFetch }) => {
@@ -366,7 +427,7 @@ test('Extension worker: Telegram-Fehler wird erneut versucht; bestätigter Versa
 });
 
 test('Extension worker: Stop während des ersten Lease-Lesevorgangs verhindert Navigation und Versand', async () => {
-  await withWorker({ fastTimers: true, local: { settings: credentials, monitor: { enabled: true } } }, async ({ worker, chrome, session, alarmState, reloadCount, inspectionCount, setFetch }) => {
+  await withWorker({ origins: primaryShopOrigins, fastTimers: true, local: { settings: credentials, monitor: { enabled: true } } }, async ({ worker, chrome, session, alarmState, reloadCount, inspectionCount, setFetch }) => {
     const originalGet = chrome.storage.session.get;
     let releaseLeaseRead;
     const leaseGate = new Promise(resolve => { releaseLeaseRead = resolve; });
@@ -402,7 +463,7 @@ test('Extension worker: Stop während des ersten Lease-Lesevorgangs verhindert N
 });
 
 test('Extension worker: Einzelprodukt und bisheriger Meldestatus werden ohne erneuten Alarm migriert', async () => {
-  await withWorker({
+  await withWorker({ origins: primaryShopOrigins,
     fastTimers: true,
     local: { settings: credentials, lastProductState: { url: DEFAULT_URL, status: 'available' } },
   }, async ({ worker, local, setInspectionStatus, setFetch }) => {
@@ -419,34 +480,36 @@ test('Extension worker: Einzelprodukt und bisheriger Meldestatus werden ohne ern
   });
 });
 
-test('Extension worker: Migration kanonisiert alte URLs mit abschließendem Slash ohne erneuten Alarm', async t => {
-  const oldUrl = `${DEFAULT_URL}/`;
-  for (const [name, previous] of [
+test('Extension worker: Migration normalisiert den Slash und erhält Query- und Fragmentvarianten ohne erneuten Alarm', async t => {
+  for (const [variant, oldUrl, canonicalUrl] of [
+    ['Basisprodukt', `${DEFAULT_URL}/`, DEFAULT_URL],
+    ['Variante', `${DEFAULT_URL}/?variant=blue#large`, `${DEFAULT_URL}?variant=blue#large`],
+  ]) for (const [name, previous] of [
     ['bisheriger Einzelstatus', { lastProductState: { url: oldUrl, status: 'available' } }],
     ['bereits gespeicherte Status-Map', { lastProductStates: { [oldUrl]: { url: oldUrl, status: 'available' } } }],
   ]) {
-    await t.test(name, async () => {
-      await withWorker({
+    await t.test(`${variant}: ${name}`, async () => {
+      await withWorker({ origins: primaryShopOrigins,
         fastTimers: true,
         local: { settings: { ...credentials, productUrl: oldUrl }, ...previous },
       }, async ({ worker, local, setInspectionStatus, setFetch }) => {
         const status = await worker.getStatus();
-        assert.equal(status.settings.products[0].productUrl, DEFAULT_URL);
-        assert.deepEqual(local.lastProductStates[DEFAULT_URL], { url: DEFAULT_URL, status: 'available' });
+        assert.equal(status.settings.products[0].productUrl, canonicalUrl);
+        assert.deepEqual(local.lastProductStates[canonicalUrl], { url: canonicalUrl, status: 'available' });
         assert.equal(Object.hasOwn(local.lastProductStates, oldUrl), false);
         let sends = 0;
         setFetch(async () => { sends++; throw new Error('URL-Kanonisierung darf einen bestehenden Alarm nicht wiederholen.'); });
         setInspectionStatus('available');
         await worker.runCheck();
         assert.equal(sends, 0);
-        assert.equal(local.lastProductStates[DEFAULT_URL].status, 'available');
+        assert.equal(local.lastProductStates[canonicalUrl].status, 'available');
       });
     });
   }
 });
 
 test('Extension worker: Rotation prüft pro Lauf genau ein Produkt und dedupliziert pro URL', async () => {
-  await withWorker({
+  await withWorker({ origins: primaryShopOrigins,
     fastTimers: true,
     local: { settings: { ...credentials, products: [productA, productB] } },
   }, async ({ worker, local, navigationHistory, setProductStatus, setFetch }) => {
@@ -488,7 +551,7 @@ test('Extension worker: Rotation prüft pro Lauf genau ein Produkt und deduplizi
 });
 
 test('Extension worker: Fehlgeschlagene Navigation und Worker-Neustart erhalten den Rotationsfortschritt', async () => {
-  await withWorker({
+  await withWorker({ origins: primaryShopOrigins,
     fastTimers: true,
     local: { settings: { ...credentials, products: [productA, productB, productC] } },
   }, async ({ worker, local, navigationHistory, failNextNavigation, restartWorker }) => {
@@ -511,7 +574,7 @@ test('Extension worker: Fehlgeschlagene Navigation und Worker-Neustart erhalten 
 });
 
 test('Extension worker: Umsortieren erhält das nächste Produkt; Entfernen hinterlässt keinen ungültigen Zeiger', async () => {
-  await withWorker({
+  await withWorker({ origins: primaryShopOrigins,
     fastTimers: true,
     local: {
       settings: { ...credentials, products: [productA, productB, productC] },
@@ -534,7 +597,7 @@ test('Extension worker: Umsortieren erhält das nächste Produkt; Entfernen hint
 });
 
 test('Extension worker: Speichern neuer Zeitgrenzen ersetzt bei laufender Überwachung sofort den Termin', async () => {
-  await withWorker({
+  await withWorker({ origins: primaryShopOrigins,
     local: { settings: { ...credentials, products: [productA], minMinutes: 15, maxMinutes: 30 }, monitor: { enabled: true } },
   }, async ({ worker, local, alarmState, alarmCalls, reloadCount }) => {
     const previousCalls = alarmCalls.filter(call => call.name === NEXT).length;
@@ -555,7 +618,7 @@ test('Extension worker: Speichern neuer Zeitgrenzen ersetzt bei laufender Überw
 
 test('Extension worker: Zweites Produkt setzt einen begonnenen Einzelprodukt-Zyklus sinnvoll fort', async t => {
   await t.test('bereits geprüftes A wird beim Hinzufügen von B nicht erneut vorgezogen', async () => {
-    await withWorker({
+    await withWorker({ origins: primaryShopOrigins,
       fastTimers: true,
       local: {
         settings: { ...credentials, products: [productA] },
@@ -579,7 +642,7 @@ test('Extension worker: Zweites Produkt setzt einen begonnenen Einzelprodukt-Zyk
   });
 
   await t.test('noch nie geprüftes A bleibt nach dem Hinzufügen von B zuerst an der Reihe', async () => {
-    await withWorker({
+    await withWorker({ origins: primaryShopOrigins,
       fastTimers: true,
       local: {
         settings: { ...credentials, products: [productA] },
@@ -593,5 +656,182 @@ test('Extension worker: Zweites Produkt setzt einen begonnenen Einzelprodukt-Zyk
       assert.deepEqual(navigationHistory, [productA.productUrl]);
       assert.equal(local.monitor.nextProductUrl, productB.productUrl);
     });
+  });
+});
+
+test('Extension worker: Verschiedene Shops rotieren mit eigenen Tabs, Regeln und Meldestatus', async () => {
+  const other = {
+    productUrl: 'https://shop.example.test/products/box?variant=blue', productTitle: 'Andere Box',
+    buttonSelector: '#purchase', buttonText: 'Jetzt bestellen',
+  };
+  await withWorker({
+    fastTimers: true,
+    origins: ['https://shop.example/*', 'https://shop.example.test/*'],
+    local: { settings: { ...credentials, products: [productA, other] } },
+  }, async ({ worker, local, navigationHistory, inspectionArguments, tabQueries, setInspectionStatus, setFetch }) => {
+    const messages = [];
+    setInspectionStatus('available');
+    setFetch(async (_url, options) => {
+      messages.push(JSON.parse(options.body).text);
+      return { ok: true, status: 200, json: async () => ({ ok: true, result: {} }) };
+    });
+    for (let index = 0; index < 4; index++) await worker.runCheck();
+    assert.deepEqual(navigationHistory, [productA.productUrl, other.productUrl, productA.productUrl, other.productUrl]);
+    assert.ok(tabQueries.includes('https://shop.example.test/*'));
+    const otherArguments = inspectionArguments.find(args => args.productUrl === other.productUrl);
+    assert.deepEqual(otherArguments, other);
+    assert.equal(JSON.stringify(inspectionArguments).includes(credentials.botToken), false);
+    assert.equal(messages.length, 2);
+    assert.match(messages[1], /^IchWillNixVerpassen:/);
+    assert.ok(messages[1].includes(other.productUrl));
+    assert.equal(local.lastProductStates[other.productUrl].status, 'available');
+  });
+});
+
+test('Extension worker: Fehlende Shopfreigabe verhindert Speichern und Start ohne alte Daten zu ändern', async () => {
+  const other = { productUrl: 'https://shop.example.test/box', productTitle: 'Andere Box' };
+  await withWorker({ origins: primaryShopOrigins, local: { settings: credentials } }, async ({ worker, local, grantedOrigins, alarmState }) => {
+    await assert.rejects(worker.handleMessage({ type: 'SAVE_SETTINGS', payload: { products: [other] } }), /Zugriff.*shop\.example\.test.*speichern/);
+    assert.deepEqual(local.settings.products, [productA]);
+    assert.equal(local.settings.botToken, credentials.botToken);
+    grantedOrigins.add('https://shop.example.test/*');
+    await worker.handleMessage({ type: 'SAVE_SETTINGS', payload: { products: [other] } });
+    assert.deepEqual(local.settings.products, [other]);
+    grantedOrigins.delete('https://shop.example.test/*');
+    await assert.rejects(worker.handleMessage({ type: 'START' }), /Zugriff/);
+    assert.notEqual(local.monitor.enabled, true);
+    assert.equal(alarmState.has(NEXT), false);
+  });
+});
+
+test('Extension worker: Entzogene Shopfreigabe navigiert nicht und blockiert die übrige Rotation nicht', async () => {
+  const other = { productUrl: 'https://shop.example.test/box', productTitle: 'Andere Box' };
+  await withWorker({ origins: primaryShopOrigins,
+    fastTimers: true,
+    local: { settings: { ...credentials, products: [other, productA] }, monitor: { enabled: true } },
+  }, async ({ worker, local, navigationHistory, inspectionCount, alarmState }) => {
+    await worker.runCheck();
+    assert.deepEqual(navigationHistory, []);
+    assert.equal(inspectionCount(), 0);
+    assert.match(local.productResults[other.productUrl].lastError, /Zugriff/);
+    assert.equal(local.monitor.nextProductUrl, productA.productUrl);
+    assert.equal(alarmState.has(NEXT), true);
+    await worker.runCheck();
+    assert.deepEqual(navigationHistory, [productA.productUrl]);
+    assert.equal(local.productResults[productA.productUrl].status, 'unavailable');
+  });
+});
+
+test('Extension worker: Gleiches Produkt mit anderer URL-Variante verwendet nicht den falschen Tab', async () => {
+  const blue = { productUrl: 'https://shop.example.test/box?variant=blue#buy', productTitle: 'Blaue Box' };
+  const redUrl = 'https://shop.example.test/box?variant=red#buy';
+  await withWorker({
+    fastTimers: true,
+    origins: ['https://shop.example.test/*'],
+    local: { settings: { ...credentials, products: [blue] } },
+    tabs: [{ id: 1, url: redUrl, status: 'complete' }],
+  }, async ({ worker, navigationHistory, reloadCount, inspectionHistory }) => {
+    await worker.runCheck();
+    assert.deepEqual(navigationHistory, [blue.productUrl]);
+    assert.equal(reloadCount(), 0);
+    assert.deepEqual(new Set(inspectionHistory), new Set([blue.productUrl]));
+  });
+});
+
+test('Extension worker: Stop während der Befehlsvorbereitung verhindert eine verspätete Sofortprüfung', async () => {
+  await withWorker({ origins: primaryShopOrigins, fastTimers: true, local: { settings: credentials, monitor: { enabled: true } } }, async ({ worker, chrome, reloadCount, inspectionCount }) => {
+    const originalGet = chrome.storage.local.get;
+    let waiting = false;
+    let intercepted = false;
+    let release;
+    const gate = new Promise(resolve => { release = resolve; });
+    chrome.storage.local.get = async keys => {
+      const snapshot = await originalGet(keys);
+      if (!intercepted && Array.isArray(keys) && keys.includes('settings')) {
+        intercepted = true;
+        waiting = true;
+        await gate;
+      }
+      return snapshot;
+    };
+    const pending = worker.handleMessage({ type: 'CHECK_NOW' }).then(value => ({ value }), error => ({ error }));
+    await spinUntil(() => waiting);
+    await worker.handleMessage({ type: 'STOP' });
+    release();
+    const result = await pending;
+    assert.match(result.error?.message || '', /beendet/);
+    assert.equal(reloadCount(), 0);
+    assert.equal(inspectionCount(), 0);
+    assert.equal((await worker.getStatus()).monitor.enabled, false);
+  });
+});
+
+test('Extension worker: Stop während eines Alarm-Speicherlesens verhindert eine Prüfung aus einem alten Aktiv-Snapshot', async () => {
+  await withWorker({ origins: primaryShopOrigins, fastTimers: true, local: { settings: credentials, monitor: { enabled: true } } }, async ({ worker, chrome, alarmState, navigationHistory, inspectionCount, setFetch }) => {
+    const originalGet = chrome.storage.local.get;
+    let waiting = false;
+    let intercepted = false;
+    let release;
+    const gate = new Promise(resolve => { release = resolve; });
+    chrome.storage.local.get = async keys => {
+      const snapshot = await originalGet(keys);
+      if (!intercepted && Array.isArray(keys) && keys.includes('settings')) {
+        intercepted = true;
+        waiting = true;
+        await gate;
+      }
+      return snapshot;
+    };
+    let sends = 0;
+    setFetch(async () => { sends++; throw new Error('Ein bereits gestoppter Alarm darf keine Nachricht senden.'); });
+    chrome.alarms.onAlarm.listeners[0]({ name: NEXT });
+    await spinUntil(() => waiting);
+    await worker.handleMessage({ type: 'STOP' });
+    release();
+    // Drain the released handler's promise continuations without advancing the
+    // fake worker's inspection timers or relying on an arbitrary sleep.
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(navigationHistory, []);
+    assert.equal(inspectionCount(), 0);
+    assert.equal(sends, 0);
+    assert.equal(alarmState.has(NEXT), false);
+    assert.equal(alarmState.has(WATCHDOG), false);
+    const status = await worker.getStatus();
+    assert.equal(status.monitor.enabled, false);
+    assert.equal(status.monitor.checking, false);
+    assert.equal(status.monitor.nextCheckAt, null);
+  });
+});
+
+test('Extension worker: Mehr als zehn Artikel werden gespeichert und über Neustarts vollständig weiterrotiert', async () => {
+  const products = Array.from({ length: 12 }, (_, index) => ({
+    productUrl: `${DEFAULT_URL}-artikel-${index + 1}`,
+    productTitle: `Artikel ${index + 1}`,
+  }));
+  await withWorker({ origins: primaryShopOrigins, fastTimers: true, local: { settings: credentials } }, async ({ worker, local, navigationHistory, restartWorker, setFetch }) => {
+    let requests = 0;
+    setFetch(async () => { requests++; throw new Error('Nicht lieferbare Artikel dürfen keine Telegram-Nachricht auslösen.'); });
+    const saved = await worker.handleMessage({ type: 'SAVE_SETTINGS', payload: { products } });
+    assert.deepEqual(saved.settings.products, products);
+    assert.deepEqual(local.settings.products, products);
+    assert.equal(saved.productStatuses.length, 12, 'Auch die Statusliste darf nicht bei zehn Artikeln abgeschnitten werden');
+
+    for (let index = 0; index < 10; index++) await worker.runCheck();
+    assert.deepEqual(navigationHistory, products.slice(0, 10).map(product => product.productUrl));
+    assert.equal(local.monitor.nextProductUrl, products[10].productUrl, 'Nach Artikel zehn muss Artikel elf folgen');
+
+    const restarted = await restartWorker();
+    assert.equal((await restarted.getStatus()).monitor.nextProductUrl, products[10].productUrl);
+    await restarted.runCheck();
+    assert.equal(navigationHistory.at(-1), products[10].productUrl, 'Der Worker-Neustart darf Artikel elf nicht überspringen');
+    assert.equal(local.monitor.nextProductUrl, products[11].productUrl);
+    await restarted.runCheck();
+    assert.deepEqual(navigationHistory, products.map(product => product.productUrl));
+    assert.equal(local.monitor.nextProductUrl, products[0].productUrl, 'Nach dem letzten Artikel geht es wieder beim ersten weiter');
+    await restarted.runCheck();
+    assert.deepEqual(navigationHistory, [...products.map(product => product.productUrl), products[0].productUrl]);
+    assert.equal(local.monitor.nextProductUrl, products[1].productUrl);
+    for (const product of products) assert.equal(local.lastProductStates[product.productUrl].status, 'unavailable');
+    assert.equal(requests, 0);
   });
 });

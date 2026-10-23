@@ -1,12 +1,12 @@
 {
-  "name": "pokemon-center-check",
-  "version": "1.1.1",
-  "description": "Chrome-Erweiterung zur abwechselnden Verfügbarkeitsprüfung von bis zu zehn Pokémon-Center-Produkten mit Telegram-Benachrichtigung.",
+  "name": "ichwillnixverpassen",
+  "version": "1.3.3",
+  "description": "Chrome-Erweiterung zur Lieferbarkeitsprüfung von Produkten verschiedener Shops ohne feste Artikelgrenze mit Telegram-Benachrichtigung.",
   "private": true,
   "type": "module",
-  "repository": { "type": "git", "url": "https://github.com/lexxmm/PokemonCenterCheck.git" },
-  "homepage": "https://github.com/lexxmm/PokemonCenterCheck#readme",
-  "bugs": { "url": "https://github.com/lexxmm/PokemonCenterCheck/issues" },
+  "repository": { "type": "git", "url": "https://github.com/lexxmm/IchWillNixVerpassen.git" },
+  "homepage": "https://github.com/lexxmm/IchWillNixVerpassen#readme",
+  "bugs": { "url": "https://github.com/lexxmm/IchWillNixVerpassen/issues" },
   "engines": { "node": ">=22.9" },
   "scripts": {
     "test": "node --test tests/*.test.mjs",

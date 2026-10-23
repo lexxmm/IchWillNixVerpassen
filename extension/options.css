@@ -30,11 +30,17 @@ dd { font-weight: 600; margin: 0; overflow-wrap: anywhere; }
 #last-status[data-state="unknown"] { color: #935a10; }
 .field { margin-bottom: 21px; }
 .settings-intro { margin-top: -10px; margin-bottom: 20px; }
+.permissions-help { margin: -8px 0 20px; }
 .product-editors { display: grid; gap: 16px; }
 .product-editor { border: 1px solid #dce2e8; border-radius: 8px; padding: 16px; min-width: 0; margin: 0; }
 .product-editor legend { padding: 0 6px; font-size: 13px; font-weight: 700; color: #526273; }
 .product-editor .field { margin-bottom: 14px; }
 .product-editor .actions { justify-content: flex-end; }
+.detection-options { margin: 3px 0 17px; border-top: 1px solid #e3e8ed; padding-top: 12px; }
+.detection-options summary { cursor: pointer; color: #405a78; font-size: 13px; font-weight: 650; }
+.detection-options > .hint { margin: 10px 0 15px; }
+.detection-options .field:last-child { margin-bottom: 0; }
+.selector-input { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 13px; }
 .product-editor button { padding: 7px 10px; font-size: 12px; }
 .product-add-row { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin: 17px 0 26px; }
 .product-add-row .hint { margin: 0; }

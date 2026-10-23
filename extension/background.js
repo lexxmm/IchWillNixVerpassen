@@ -1,7 +1,7 @@
-import { normalizeSettings, chooseDelayMs, shouldNotify, inspectProduct, nextProduct, canonicalProductUrl } from './core.js';
+import { normalizeSettings, chooseDelayMs, shouldNotify, inspectProduct, nextProduct, canonicalProductUrl, sameProductUrl, sitePermissionPattern } from './core.js';
 
-const NEXT = 'pokemon-next-check';
-const WATCHDOG = 'pokemon-check-watchdog';
+const NEXT = 'ichwillnixverpassen-next-check';
+const WATCHDOG = 'ichwillnixverpassen-check-watchdog';
 const LEASE_MS = 120000;
 const emptyMonitor = { enabled: false, checking: false, nextCheckAt: null, lastCheckAt: null, lastStatus: null, lastError: '', lastNotificationAt: null };
 let currentRun = null;
@@ -77,22 +77,25 @@ export async function getStatus() {
   };
 }
 
-async function scheduleNext() {
+async function scheduleNext(preserveDeadline = false) {
   return mutate(async () => {
     const { monitor, settings } = await state();
     if (!monitor.enabled) return;
-    const nextCheckAt = Date.now() + chooseDelayMs(Math.random, settings.minMinutes, settings.maxMinutes);
+    const now = Date.now();
+    const nextCheckAt = preserveDeadline && Number.isFinite(monitor.nextCheckAt) && monitor.nextCheckAt > now
+      ? monitor.nextCheckAt
+      : now + chooseDelayMs(Math.random, settings.minMinutes, settings.maxMinutes);
     await chrome.alarms.create(NEXT, { when: nextCheckAt });
     await chrome.storage.local.set({ monitor: { ...monitor, nextCheckAt } });
   });
 }
 
-function sameProduct(url, target) {
-  try {
-    const current = new URL(url);
-    const expected = new URL(target);
-    return current.origin === expected.origin && current.pathname.replace(/\/+$/, '') === expected.pathname.replace(/\/+$/, '');
-  } catch { return false; }
+async function requireSiteAccess(products) {
+  for (const product of products) {
+    if (!await chrome.permissions.contains({ origins: [sitePermissionPattern(product.productUrl)] })) {
+      throw new Error(`Zugriff auf ${new URL(product.productUrl).hostname} fehlt. Bitte die Einstellungen erneut speichern und den Shop in Chrome freigeben.`);
+    }
+  }
 }
 
 async function telegram(settings, method, body) {
@@ -124,12 +127,12 @@ async function productTab(settings, previousTabId, runGeneration) {
   if (previousTabId) {
     try {
       const previous = await chrome.tabs.get(previousTabId);
-      if (sameProduct(previous.url, settings.productUrl)) tab = previous;
+      if (sameProductUrl(previous.url, settings.productUrl)) tab = previous;
     } catch { /* The previously used tab may have been closed. */ }
   }
   if (!tab) {
-    const tabs = await chrome.tabs.query({ url: 'https://www.pokemoncenter.com/de-de/product/*' });
-    tab = tabs.find(candidate => sameProduct(candidate.url, settings.productUrl));
+    const tabs = await chrome.tabs.query({ url: sitePermissionPattern(settings.productUrl) });
+    tab = tabs.find(candidate => sameProductUrl(candidate.url, settings.productUrl));
   }
   cancelled(runGeneration);
   let previousOrigin = null;
@@ -149,7 +152,7 @@ async function productTab(settings, previousTabId, runGeneration) {
     cancelled(runGeneration);
     await sleep(700);
     const current = await chrome.tabs.get(tab.id);
-    if (!sameProduct(current.url || current.pendingUrl, settings.productUrl)) throw new Error('Der Produkttab wurde auf eine andere Seite umgeleitet oder gewechselt.');
+    if (!sameProductUrl(current.url || current.pendingUrl, settings.productUrl)) throw new Error('Der Produkttab wurde auf eine andere Seite umgeleitet oder gewechselt. Bitte die endgültige Produkt-URL speichern.');
     if (current.status === 'complete') {
       try {
         const [{ result }] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => ({ ready: document.readyState, origin: performance.timeOrigin }) });
@@ -169,7 +172,8 @@ async function inspectTab(tabId, settings, runGeneration) {
     cancelled(runGeneration);
     const [{ result: snapshot }] = await chrome.scripting.executeScript({
       target: { tabId }, func: inspectProduct,
-      args: [{ productUrl: settings.productUrl, productTitle: settings.productTitle }],
+      args: [{ productUrl: settings.productUrl, productTitle: settings.productTitle,
+        buttonSelector: settings.buttonSelector, buttonText: settings.buttonText }],
     });
     result = snapshot;
     stable = result.status === previous ? stable + 1 : 1;
@@ -226,6 +230,8 @@ async function performCheck(runGeneration) {
     const selection = await reserveProduct(runGeneration, startedAt);
     settings = selection.settings;
     product = selection.product;
+    await requireSiteAccess([product]);
+    cancelled(runGeneration);
     const tabId = await productTab(product, selection.monitor.productTabId, runGeneration);
     const result = await inspectTab(tabId, product, runGeneration);
     cancelled(runGeneration);
@@ -237,7 +243,7 @@ async function performCheck(runGeneration) {
     if (shouldNotify(latest.lastProductStates[product.productUrl], product.productUrl, result.status)) {
       if (!settings.botToken || !settings.chatId) throw new Error('Produkt verfügbar, aber Telegram ist noch nicht eingerichtet. Bitte Bot-Token und Chat-ID speichern.');
       cancelled(runGeneration);
-      await sendTelegram(settings, `Pokémon Center: Warenkorb-Button bedienbar!\n${product.productTitle}\n${product.productUrl}`);
+      await sendTelegram(settings, `IchWillNixVerpassen: Produkt lieferbar!\n${product.productTitle}\n${product.productUrl}`);
       await publishProductResult(product, { lastNotificationAt: Date.now() });
       await log(`${product.productTitle}: Verfügbarkeit per Telegram gemeldet.`);
     }
@@ -247,7 +253,7 @@ async function performCheck(runGeneration) {
       await chrome.storage.local.set({ lastProductStates: { ...lastProductStates, [product.productUrl]: { url: product.productUrl, status: result.status } } });
     });
     await badge(result.status === 'available' ? 'JA' : '–', result.status === 'available' ? '#167047' : '#64748b');
-    await log(`${product.productTitle}: ${result.status === 'available' ? 'Produkt verfügbar: Warenkorb-Button bedienbar.' : 'Produkt derzeit nicht verfügbar.'}`);
+    await log(`${product.productTitle}: ${result.status === 'available' ? 'Produkt lieferbar.' : 'Produkt derzeit nicht kaufbar.'}`);
   } catch (error) {
     // Only fixed API errors or our own product diagnostics reach this path, never credentials.
     const message = error.message.split(settings?.botToken || '\u0000').join('[TOKEN]');
@@ -280,6 +286,10 @@ export async function runCheck() {
 
 async function initialize() {
   await chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' });
+  // Alarm names may change between releases; retain only the current timers.
+  for (const alarm of await chrome.alarms.getAll()) {
+    if (alarm.name !== NEXT && alarm.name !== WATCHDOG) await chrome.alarms.clear(alarm.name);
+  }
   await mutate(async () => {
     const { settings, monitor, lastProductStates, productResults } = await state();
     const next = nextProduct(settings.products, monitor.nextProductUrl);
@@ -298,7 +308,7 @@ async function initialize() {
       await chrome.alarms.create(WATCHDOG, { when: checkLease + LEASE_MS });
     }
   }
-  if (monitor.enabled && !await chrome.alarms.get(NEXT)) await scheduleNext();
+  if (monitor.enabled && !await chrome.alarms.get(NEXT)) await scheduleNext(true);
 }
 
 export async function handleMessage(message) {
@@ -310,6 +320,7 @@ export async function handleMessage(message) {
     case 'SAVE_SETTINGS': {
       if (currentRun) throw new Error('Bitte die laufende Prüfung abwarten, bevor du Einstellungen änderst.');
       const next = normalizeSettings(message.payload, settings);
+      await requireSiteAccess(next.products);
       await mutate(async () => {
         if (currentRun) throw new Error('Bitte die laufende Prüfung abwarten, bevor du Einstellungen änderst.');
         const { monitor, productResults } = await state();
@@ -330,6 +341,7 @@ export async function handleMessage(message) {
     }
     case 'START': {
       if (!settings.botToken || !settings.chatId) throw new Error('Bitte zuerst Bot-Token und Chat-ID speichern und Telegram testen.');
+      await requireSiteAccess(settings.products);
       cancelled(commandGeneration);
       await updateMonitor({ enabled: true });
       cancelled(commandGeneration);
@@ -345,9 +357,11 @@ export async function handleMessage(message) {
       await log('Überwachung angehalten.');
       return getStatus();
     }
-    case 'CHECK_NOW': return runCheck();
+    case 'CHECK_NOW':
+      cancelled(commandGeneration);
+      return runCheck();
     case 'TEST_TELEGRAM':
-      await sendTelegram(settings, 'Pokémon-Check: Telegram-Verbindung funktioniert.');
+      await sendTelegram(settings, 'IchWillNixVerpassen: Telegram-Verbindung funktioniert.');
       await log('Telegram-Testnachricht gesendet.');
       return { sent: true };
     case 'LIST_CHATS': {
@@ -370,9 +384,11 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
 });
 chrome.action.onClicked.addListener(() => { void chrome.runtime.openOptionsPage(); });
 chrome.alarms.onAlarm.addListener(alarm => {
+  const alarmGeneration = generation;
   void (async () => {
     await ready;
     const { monitor } = await state();
+    if (alarmGeneration !== generation) return;
     if (alarm.name === WATCHDOG && !currentRun) {
       await chrome.storage.session.remove('checkLease');
       await updateMonitor({ checking: false, checkingProductUrl: null, checkingProductTitle: null, lastError: 'Die letzte Prüfung wurde unterbrochen. Ein neuer Termin wird geplant.' });
@@ -380,7 +396,7 @@ chrome.alarms.onAlarm.addListener(alarm => {
     } else if (alarm.name === NEXT && monitor.enabled) {
       try { await runCheck(); } catch (error) { await log(error.message); await scheduleNext(); }
     }
-  })().catch(error => console.error('Pokémon-Check:', error.message));
+  })().catch(error => console.error('IchWillNixVerpassen:', error.message));
 });
 chrome.runtime.onInstalled.addListener(event => {
   void initialize().then(() => { if (event.reason === 'install') return chrome.runtime.openOptionsPage(); });

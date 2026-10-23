@@ -3,16 +3,16 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Pokémon Center Check</title>
+    <title>IchWillNixVerpassen</title>
     <link rel="stylesheet" href="options.css">
     <script type="module" src="options.js"></script>
   </head>
   <body>
     <main>
       <header class="page-header">
-        <p class="eyebrow">Pokémon Center Check</p>
-        <h1>Verfügbarkeit im Blick</h1>
-        <p>Prüft bis zu zehn Produkte nacheinander und meldet Verfügbarkeit über Telegram. Die zufälligen Abstände zwischen den Prüfungen bestimmst du selbst.</p>
+        <p class="eyebrow">Deine Produktbeobachtung</p>
+        <h1>IchWillNixVerpassen</h1>
+        <p>Prüft die Lieferbarkeit deiner Produkte nacheinander und meldet lieferbare Produkte über Telegram. Die zufälligen Abstände zwischen den Prüfungen bestimmst du selbst.</p>
       </header>
 
       <p id="connection-error" class="notice error" role="alert" hidden></p>
@@ -24,7 +24,7 @@
           <span id="monitor-badge" class="badge">Wird geladen …</span>
         </div>
         <dl class="status-grid">
-          <div><dt>Produktstatus</dt><dd id="last-status">Noch nicht geprüft</dd></div>
+          <div><dt>Lieferstatus</dt><dd id="last-status">Noch nicht geprüft</dd></div>
           <div><dt>Zuletzt geprüftes Produkt</dt><dd id="last-product">—</dd></div>
           <div><dt>Letzte Prüfung</dt><dd><time id="last-check">—</time></dd></div>
           <div><dt>Als Nächstes</dt><dd id="next-product">—</dd></div>
@@ -43,22 +43,23 @@
           <button id="stop" type="button" disabled>Stoppen</button>
           <button id="check" type="button" disabled>Nächstes Produkt jetzt prüfen</button>
         </div>
-        <p class="hint">Pro Termin wird genau ein Produkt geprüft, danach ist das nächste an der Reihe. Chrome muss geöffnet und der Rechner eingeschaltet bleiben. Im Ruhezustand kann sich eine Prüfung verzögern. Der Check legt nichts in den Warenkorb.</p>
+        <p class="hint">Pro Termin wird die Lieferbarkeit genau eines Produkts geprüft, danach ist das nächste an der Reihe. Chrome muss geöffnet und der Rechner eingeschaltet bleiben. Im Ruhezustand kann sich eine Prüfung verzögern. Der Check bestellt nichts und legt nichts in den Warenkorb.</p>
       </section>
 
       <section class="card" aria-labelledby="products-status-title">
-        <h2 id="products-status-title">Status deiner Produkte</h2>
+        <h2 id="products-status-title">Lieferstatus deiner Produkte</h2>
         <ol id="product-statuses" class="product-status-list"></ol>
       </section>
 
       <form id="settings-form" class="card" aria-labelledby="settings-title">
         <h2 id="settings-title">Produkte und Prüfzeiten</h2>
         <p id="unsaved-form" class="unsaved-form" role="status" hidden>Ungespeicherte Änderungen – zuerst speichern. Erst danach werden die geänderten Produkte und Prüfzeiten verwendet.</p>
-        <p id="product-help" class="hint settings-intro">Bis zu zehn verschiedene Pokémon-Center-Produkte. Als Name genügt ein eindeutiger Teil der Produktüberschrift, zum Beispiel „Delta-Herrschaft“. Die Reihenfolge unten bestimmt die Reihenfolge der Prüfungen.</p>
+        <p id="product-help" class="hint settings-intro">Produkte aus verschiedenen Onlineshops hinzufügen. Als Name genügt ein eindeutiger Teil der echten Produktüberschrift, zum Beispiel „Kopfhörer“. Die Lieferbarkeit wird automatisch anhand der Angaben auf der Produktseite geprüft. Die Reihenfolge unten bestimmt die Reihenfolge der Prüfungen.</p>
+        <p class="hint permissions-help">Beim Speichern fragt Chrome nach Zugriff auf die eingetragenen Shops. Bestätige den Zugriff, damit deren Produktseiten geprüft werden können. Fehlt er bei einem bereits gespeicherten Produkt, einfach erneut speichern und den Zugriff bestätigen.</p>
         <div id="product-editors" class="product-editors"></div>
         <div class="product-add-row">
           <button id="add-product" type="button" disabled>Produkt hinzufügen</button>
-          <span id="product-count" class="hint" aria-live="polite">0 von 10 Produkten</span>
+          <span id="product-count" class="hint" aria-live="polite">0 Produkte</span>
         </div>
         <fieldset class="interval-fields">
           <legend>Abstand zwischen den Prüfungen</legend>
@@ -93,7 +94,7 @@
           <button id="list-chats" type="button" disabled>Chat-ID ermitteln</button>
           <button id="test-telegram" type="button" disabled>Telegram testen</button>
         </div>
-        <p class="hint">Telegram-Test, Chat-Suche und Prüfungen verwenden die gespeicherten Einstellungen. Änderungen deshalb zuerst speichern. Eine Sofortprüfung kann bei verfügbarem Bestand eine Telegram-Meldung senden.</p>
+        <p class="hint">Telegram-Test, Chat-Suche und Prüfungen verwenden die gespeicherten Einstellungen. Änderungen deshalb zuerst speichern. Eine Sofortprüfung kann bei einem lieferbaren Produkt eine Telegram-Meldung senden.</p>
         <div id="chats-field" class="field chats-field" hidden>
           <label for="chats">Gefundene Telegram-Chats</label>
           <select id="chats"><option value="">Chat auswählen …</option></select>
@@ -106,7 +107,7 @@
         <p id="empty-history" class="hint">Hier erscheinen die letzten Prüfungen und Meldungen.</p>
         <ol id="history" class="history"></ol>
       </section>
-      <footer>Ohne Cron und ohne Debugging-Anschluss. Bei unverändertem Bestand wird keine weitere Verfügbarkeitsmeldung gesendet.</footer>
+      <footer>Ohne Cron und ohne Debugging-Anschluss. Bleibt ein Produkt lieferbar, wird keine weitere Verfügbarkeitsmeldung gesendet.</footer>
     </main>
   </body>
 </html>
