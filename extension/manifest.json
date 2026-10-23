@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "Pokémon Center Check",
+  "version": "1.1.1",
+  "description": "Prüft bis zu zehn Pokémon-Center-Produkte abwechselnd in wählbaren Zufallsabständen und meldet Verfügbarkeit per Telegram.",
+  "minimum_chrome_version": "120",
+  "permissions": ["alarms", "storage", "scripting"],
+  "host_permissions": ["https://www.pokemoncenter.com/*", "https://api.telegram.org/*"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "action": { "default_title": "Pokémon Center Check öffnen" },
+  "options_page": "options.html",
+  "content_security_policy": { "extension_pages": "script-src 'self'; object-src 'none'; base-uri 'none'" }
+}

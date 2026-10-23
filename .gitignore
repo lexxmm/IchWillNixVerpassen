@@ -1,0 +1,19 @@
+node_modules/
+
+# Local credentials, browser state, and workspace settings
+.env
+.env.*
+!.env.example
+/var/
+*chrome-profile*/
+/.aws/
+/.codex/
+/.agents/
+.venv/
+
+# Generated local files
+*.log
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db

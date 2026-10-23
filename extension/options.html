@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Pokémon Center Check</title>
+    <link rel="stylesheet" href="options.css">
+    <script type="module" src="options.js"></script>
+  </head>
+  <body>
+    <main>
+      <header class="page-header">
+        <p class="eyebrow">Pokémon Center Check</p>
+        <h1>Verfügbarkeit im Blick</h1>
+        <p>Prüft bis zu zehn Produkte nacheinander und meldet Verfügbarkeit über Telegram. Die zufälligen Abstände zwischen den Prüfungen bestimmst du selbst.</p>
+      </header>
+
+      <p id="connection-error" class="notice error" role="alert" hidden></p>
+      <p id="notice" class="notice" role="status" aria-live="polite" hidden></p>
+
+      <section class="card status-card" aria-labelledby="status-title">
+        <div class="section-heading">
+          <h2 id="status-title">Überwachung</h2>
+          <span id="monitor-badge" class="badge">Wird geladen …</span>
+        </div>
+        <dl class="status-grid">
+          <div><dt>Produktstatus</dt><dd id="last-status">Noch nicht geprüft</dd></div>
+          <div><dt>Zuletzt geprüftes Produkt</dt><dd id="last-product">—</dd></div>
+          <div><dt>Letzte Prüfung</dt><dd><time id="last-check">—</time></dd></div>
+          <div><dt>Als Nächstes</dt><dd id="next-product">—</dd></div>
+          <div><dt>Nächste Prüfung</dt><dd><time id="next-check">—</time></dd></div>
+          <div><dt>Letzte Telegram-Meldung</dt><dd><time id="last-notification">—</time></dd></div>
+        </dl>
+        <p id="checking-product" class="checking-product" role="status" hidden></p>
+        <p id="saved-interval" class="hint interval-summary"></p>
+        <p id="monitor-error" class="inline-error" role="status" hidden></p>
+        <div id="unsaved-status" class="unsaved-banner" role="status" hidden>
+          <p>Ungespeicherte Änderungen – zuerst speichern.</p>
+          <button id="save-from-status" type="button" class="primary" disabled>Änderungen speichern</button>
+        </div>
+        <div class="actions">
+          <button id="start" type="button" class="primary" disabled>Überwachung starten</button>
+          <button id="stop" type="button" disabled>Stoppen</button>
+          <button id="check" type="button" disabled>Nächstes Produkt jetzt prüfen</button>
+        </div>
+        <p class="hint">Pro Termin wird genau ein Produkt geprüft, danach ist das nächste an der Reihe. Chrome muss geöffnet und der Rechner eingeschaltet bleiben. Im Ruhezustand kann sich eine Prüfung verzögern. Der Check legt nichts in den Warenkorb.</p>
+      </section>
+
+      <section class="card" aria-labelledby="products-status-title">
+        <h2 id="products-status-title">Status deiner Produkte</h2>
+        <ol id="product-statuses" class="product-status-list"></ol>
+      </section>
+
+      <form id="settings-form" class="card" aria-labelledby="settings-title">
+        <h2 id="settings-title">Produkte und Prüfzeiten</h2>
+        <p id="unsaved-form" class="unsaved-form" role="status" hidden>Ungespeicherte Änderungen – zuerst speichern. Erst danach werden die geänderten Produkte und Prüfzeiten verwendet.</p>
+        <p id="product-help" class="hint settings-intro">Bis zu zehn verschiedene Pokémon-Center-Produkte. Als Name genügt ein eindeutiger Teil der Produktüberschrift, zum Beispiel „Delta-Herrschaft“. Die Reihenfolge unten bestimmt die Reihenfolge der Prüfungen.</p>
+        <div id="product-editors" class="product-editors"></div>
+        <div class="product-add-row">
+          <button id="add-product" type="button" disabled>Produkt hinzufügen</button>
+          <span id="product-count" class="hint" aria-live="polite">0 von 10 Produkten</span>
+        </div>
+        <fieldset class="interval-fields">
+          <legend>Abstand zwischen den Prüfungen</legend>
+          <div class="interval-inputs">
+            <div class="field">
+              <label for="min-minutes">Von (Minuten)</label>
+              <input id="min-minutes" name="minMinutes" type="number" min="1" max="1440" step="0.01" required inputmode="decimal" aria-describedby="interval-help">
+            </div>
+            <div class="field">
+              <label for="max-minutes">Bis (Minuten)</label>
+              <input id="max-minutes" name="maxMinutes" type="number" min="1" max="1440" step="0.01" required inputmode="decimal" aria-describedby="interval-help">
+            </div>
+          </div>
+          <p id="interval-help" class="hint">Nach jeder Prüfung wird ein neuer zufälliger Abstand innerhalb dieser Zeitspanne gewählt. Gleiche Werte ergeben einen festen Abstand. Bei drei Produkten geht es reihum: A → B → C → A. Die Zeitspanne gilt zwischen einzelnen Produktprüfungen.</p>
+        </fieldset>
+        <h3 class="telegram-title">Telegram</h3>
+        <div class="field">
+          <p class="hint">Einstellungen und Zugangsdaten bleiben lokal in dieser Erweiterung.</p>
+        </div>
+        <div class="field">
+          <label for="bot-token">Telegram-Bot-Token</label>
+          <input id="bot-token" name="botToken" type="password" spellcheck="false" autocomplete="new-password" aria-describedby="token-help" placeholder="Token von @BotFather">
+          <p id="token-help" class="hint">Wird nur lokal in dieser Erweiterung gespeichert. Ein leeres Feld behält den bereits gespeicherten Token.</p>
+        </div>
+        <div class="field">
+          <label for="chat-id">Telegram-Chat-ID</label>
+          <input id="chat-id" name="chatId" type="text" spellcheck="false" autocomplete="off" aria-describedby="chat-help" placeholder="Zum Beispiel 123456789">
+          <p id="chat-help" class="hint">Erstelle deinen Bot mit <a href="https://t.me/BotFather" target="_blank" rel="noreferrer">@BotFather</a> und sende deinem neuen Bot eine Nachricht. Speichere den Token, bevor du die Chat-ID ermittelst.</p>
+        </div>
+        <div class="actions">
+          <button id="save" type="submit" class="primary" disabled>Einstellungen speichern</button>
+          <button id="list-chats" type="button" disabled>Chat-ID ermitteln</button>
+          <button id="test-telegram" type="button" disabled>Telegram testen</button>
+        </div>
+        <p class="hint">Telegram-Test, Chat-Suche und Prüfungen verwenden die gespeicherten Einstellungen. Änderungen deshalb zuerst speichern. Eine Sofortprüfung kann bei verfügbarem Bestand eine Telegram-Meldung senden.</p>
+        <div id="chats-field" class="field chats-field" hidden>
+          <label for="chats">Gefundene Telegram-Chats</label>
+          <select id="chats"><option value="">Chat auswählen …</option></select>
+          <p class="hint">Eine Auswahl übernimmt die Chat-ID in das Eingabefeld. Anschließend Einstellungen speichern.</p>
+        </div>
+      </form>
+
+      <section class="card" aria-labelledby="history-title">
+        <h2 id="history-title">Letzte Ereignisse</h2>
+        <p id="empty-history" class="hint">Hier erscheinen die letzten Prüfungen und Meldungen.</p>
+        <ol id="history" class="history"></ol>
+      </section>
+      <footer>Ohne Cron und ohne Debugging-Anschluss. Bei unverändertem Bestand wird keine weitere Verfügbarkeitsmeldung gesendet.</footer>
+    </main>
+  </body>
+</html>
